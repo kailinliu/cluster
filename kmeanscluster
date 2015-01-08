@@ -1,0 +1,124 @@
+import numpy
+import nltk
+import csv
+import sklearn
+from sklearn.feature_extraction.text import CountVectorizer
+from nltk import cluster
+from nltk.probability import DictionaryProbDist
+from numpy import sqrt
+from HTMLParser import HTMLParser
+from bs4 import BeautifulSoup, UnicodeDammit
+
+#Define data source and iterate through a few different numbers of clusters for kmeans
+file='filename.csv'
+numbers=[80,100,200]
+
+#cosine_distance is in the nltk library, but I had to edit it to transpose the matrices because I kept getting an out-of-bounds matrix error
+def cosine_distance(u, v):
+    """
+    Returns 1 minus the cosine of the angle between vectors v and u. This is equal to
+    1 - (u.v / |u||v|).
+    """
+    return 1 - (numpy.dot(u, v.T) / (sqrt(numpy.dot(u, u.T)) * sqrt(numpy.dot(v, v.T))))
+
+vectorizer=CountVectorizer()
+
+#getting data from the csv file
+list=[]
+with open(file,'rb') as data:
+	parser=HTMLParser()
+	reader=csv.reader(data)
+	reader.next()
+	for row in reader:
+		list.append([parser.unescape(row[3]),parser.unescape(row[5]),parser.unescape(row[6]),parser.unescape(row[7])])
+	
+newarray=[]
+
+#I kept getting encoding issues, so I had to convert it all to Unicode
+for item in list:
+		newarray.append(UnicodeDammit(item[0], ["windows-1252","latin-1"]).unicode_markup+' '+UnicodeDammit(item[1], ["windows-1252","latin-1"]).unicode_markup+' '+UnicodeDammit(item[2], ["windows-1252","latin-1"]).unicode_markup+' '+UnicodeDammit(item[3], ["windows-1252","latin-1"]).unicode_markup)
+		
+print newarray
+		
+
+#vectorizer.fit_transform and vectorizer.transform get the dictionary of unique words from the data and makes vectors of their appearance in each observation in the data
+vectorizer.fit_transform(newarray)
+print vectorizer.vocabulary_
+
+smatrix=vectorizer.transform(newarray)
+print smatrix
+smatrix.todense()
+print smatrix.todense()
+
+from sklearn.feature_extraction.text import TfidfTransformer
+
+#normalizing the count matrix above using the frequency of each word in the dictionary
+tfidf=TfidfTransformer()
+tfidf.fit(smatrix)
+print "IDF:", tfidf.idf_
+
+tf_idf_matrix=tfidf.transform(smatrix)
+finalmatrix=numpy.asmatrix(tf_idf_matrix.todense())
+#the following print statements are commented out, but I was making sure that my matrix dimensions were correct 
+#print finalmatrix[0], finalmatrix[0].shape
+#print finalmatrix[1].T, finalmatrix[1].T.shape
+#print numpy.dot(finalmatrix[0],finalmatrix[1].T)
+#print cosine_distance(finalmatrix[0],finalmatrix[1])
+
+#the vector_compare function is included in nltk, but I had to edit it to use numpy.sum
+def _vector_compare(x, y):
+    xs, ys = numpy.sum(x), numpy.sum(y)
+    print xs, ys
+    if xs < ys:     return -1
+    elif xs > ys:   return 1
+    else:           return 0
+	
+#Commented statements below check that my edits to the vector_compare function work properly.
+#print _vector_compare(finalmatrix[0],finalmatrix[1])
+#print finalmatrix[0]
+#print numpy.sum(finalmatrix[0])
+	
+
+
+##confirming that my changes to cosine_distance function works properly
+#a=numpy.asmatrix([1, 2, 3, 4])
+#b=numpy.asmatrix([4,3,2,1])
+#print a, b
+#print numpy.dot(a,b.T)
+#print cosine_distance(a,b)
+
+
+#looping through the number of clusters and running the KMeans algorithm for each number of clusters
+for i in numbers:
+	print i
+	clusterer=cluster.KMeansClusterer(i, cosine_distance, repeats=20, avoid_empty_clusters=True)
+	clusters=clusterer.cluster(finalmatrix, True)
+	
+#The sample code below is from the documentation, and it includes code to print out the cluster means.  I commented it out because I didn't need the cluster means in my final output.	
+#clustermeans=numpy.asmatrix(clusterer.means())
+#print('Clustered:', finalmatrix)
+#print('Means:', clusterer.means())
+#print()
+
+	#I edited the classify_vectorspace function to also output the distance for QA purposes.
+	def classify_vectorspace(self, vector):
+    # finds the closest cluster centroid
+    # returns that cluster's index
+		best_distance = best_index = None
+		for index in range(len(self._means)):
+			mean = self._means[index]
+			dist = self._distance(vector, mean)
+			if best_distance is None or dist < best_distance:
+				best_index, best_distance = index, dist
+		return best_index, best_distance.flat[0]
+
+	distance=[]
+	for j in finalmatrix:
+		distance.append(classify_vectorspace(clusterer,j))	
+	
+
+	filename='cleanedresults%i.csv'%i
+	output=csv.writer(open(filename,'wb'))
+	for item in distance:
+		output.writerow([item[0],item[1]])
+	
